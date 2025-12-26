@@ -1,107 +1,129 @@
 import React, { useState } from 'react';
-import { MapContainer, TileLayer, Marker, Popup, useMapEvents, Polyline } from 'react-leaflet';
+import { MapContainer, TileLayer, Marker, Popup, useMapEvents, Polyline, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import axios from 'axios';
+import { Search, Navigation, MapPin } from 'lucide-react';
 
-// Fix for default Leaflet marker icons in React
+// Marker Fixes
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
-let DefaultIcon = L.icon({
-    iconUrl: markerIcon,
-    shadowUrl: markerShadow,
-    iconSize: [25, 41],
-    iconAnchor: [12, 41]
-});
+let DefaultIcon = L.icon({ iconUrl: markerIcon, shadowUrl: markerShadow, iconSize: [25, 41], iconAnchor: [12, 41] });
 L.Marker.prototype.options.icon = DefaultIcon;
 
+// Helper to auto-center map when searching
+function ChangeView({ center }) {
+  const map = useMap();
+  if (center) map.setView(center, 14);
+  return null;
+}
+
 export default function MapView({ onRouteDataReceived }) {
-  const [startPos] = useState([13.0827, 80.2707]); // Initialized to Chennai
+  const [startPos, setStartPos] = useState([13.0827, 80.2707]);
   const [endPos, setEndPos] = useState(null);
+  const [selectionMode, setSelectionMode] = useState('start'); // 'start' or 'end'
+  const [searchText, setSearchText] = useState("");
   const [routes, setRoutes] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Sub-component to capture map clicks
+  // Handle map clicks
   function MapEvents() {
     useMapEvents({
-      click: async (e) => {
+      click: (e) => {
         const { lat, lng } = e.latlng;
-        setEndPos([lat, lng]);
-        fetchRoutes(startPos, [lat, lng]);
+        if (selectionMode === 'start') setStartPos([lat, lng]);
+        else setEndPos([lat, lng]);
       },
     });
     return null;
   }
 
-  const fetchRoutes = async (origin, destination) => {
+  // Handle text search (Geocoding)
+  const handleSearch = async (e) => {
+    e.preventDefault();
+    try {
+      const res = await axios.get(`https://nominatim.openstreetmap.org/search?format=json&q=${searchText}`);
+      if (res.data.length > 0) {
+        const newCoords = [parseFloat(res.data[0].lat), parseFloat(res.data[0].lon)];
+        if (selectionMode === 'start') setStartPos(newCoords);
+        else setEndPos(newCoords);
+      }
+    } catch (err) { alert("Location not found"); }
+  };
+
+  const findRoutes = async () => {
+    if (!endPos) return alert("Please select a destination first!");
     setLoading(true);
     try {
-      // Connects to Person B's backend endpoint
-      const response = await axios.post('http://localhost:8000/compare-routes', {
-        origin: origin,
-        destination: destination
+      const res = await axios.post('http://localhost:8000/compare-routes', {
+        origin: startPos,
+        destination: endPos
       });
-      
-      // Expected backend response: { fastest: { path: [[lat,lng]...], aqi: 120 }, cleanest: { path: [...], aqi: 40 } }
-      const data = response.data;
-      
       setRoutes([
-        { color: '#3b82f6', positions: data.fastest.path, type: 'fastest', info: data.fastest },
-        { color: '#10b981', positions: data.cleanest.path, type: 'cleanest', info: data.cleanest }
+        { color: '#3b82f6', positions: res.data.fastest.path, type: 'fastest' },
+        { color: '#10b981', positions: res.data.cleanest.path, type: 'cleanest' }
       ]);
-
-      // Send data back up to App.jsx to update the comparison cards
-      if (onRouteDataReceived) onRouteDataReceived(data);
-      
-    } catch (error) {
-      console.error("Backend connection failed. Using mock data for preview:", error);
-      // Fallback Mock Data so the UI doesn't break during testing
-      setRoutes([
-        { color: '#3b82f6', positions: [origin, destination], type: 'fastest' },
-        { color: '#10b981', positions: [origin, [origin[0] + 0.005, origin[1] + 0.01], destination], type: 'cleanest' }
-      ]);
-    } finally {
-      setLoading(false);
-    }
+      onRouteDataReceived(res.data);
+    } catch (err) { console.error(err); }
+    setLoading(false);
   };
 
   return (
-    <div className="relative w-full">
-      {loading && (
-        <div className="absolute inset-0 bg-white/50 z-[2000] flex items-center justify-center rounded-xl">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-green-600"></div>
+    <div className="relative w-full space-y-4">
+      {/* Search and Selection UI */}
+      <div className="flex flex-wrap gap-3 items-center justify-between bg-white p-3 rounded-2xl border border-gray-100 shadow-sm">
+        <form onSubmit={handleSearch} className="flex-1 flex gap-2 min-w-[250px]">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-2.5 text-gray-400" size={16} />
+            <input 
+              className="w-full pl-9 pr-4 py-2 bg-gray-50 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-green-500"
+              placeholder={`Search for ${selectionMode}...`}
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+            />
+          </div>
+          <button type="submit" className="bg-gray-800 text-white px-4 py-2 rounded-xl text-sm font-bold">Go</button>
+        </form>
+
+        <div className="flex gap-1 bg-gray-100 p-1 rounded-xl">
+          <button 
+            onClick={() => setSelectionMode('start')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition ${selectionMode === 'start' ? 'bg-white text-blue-600 shadow-sm' : 'text-gray-500'}`}
+          >
+            <Navigation size={14} /> Start
+          </button>
+          <button 
+            onClick={() => setSelectionMode('end')}
+            className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition ${selectionMode === 'end' ? 'bg-white text-red-600 shadow-sm' : 'text-gray-500'}`}
+          >
+            <MapPin size={14} /> End
+          </button>
         </div>
-      )}
-      
-      <div className="h-[450px] w-full shadow-inner border border-gray-200 rounded-xl overflow-hidden">
+
+        <button 
+          onClick={findRoutes}
+          disabled={loading}
+          className="bg-green-600 hover:bg-green-700 text-white px-6 py-2 rounded-xl text-sm font-black transition disabled:opacity-50"
+        >
+          {loading ? "Calculating..." : "Find Best Route"}
+        </button>
+      </div>
+
+      {/* Map Display */}
+      <div className="h-[450px] w-full rounded-3xl overflow-hidden shadow-inner border-4 border-white">
         <MapContainer center={startPos} zoom={13} className="h-full w-full">
+          <ChangeView center={selectionMode === 'start' ? startPos : endPos} />
           <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
           <MapEvents />
           
-          <Marker position={startPos}>
-            <Popup>Starting Point (Current Location)</Popup>
-          </Marker>
+          <Marker position={startPos}><Popup>Starting Point</Popup></Marker>
+          {endPos && <Marker position={endPos}><Popup>Destination</Popup></Marker>}
 
-          {endPos && (
-            <Marker position={endPos}>
-              <Popup>Destination</Popup>
-            </Marker>
-          )}
-
-          {routes.map((route, idx) => (
-            <Polyline 
-              key={idx} 
-              positions={route.positions} 
-              color={route.color} 
-              weight={route.type === 'cleanest' ? 6 : 4} 
-              opacity={0.8}
-            />
+          {routes.map((r, i) => (
+            <Polyline key={i} positions={r.positions} color={r.color} weight={r.type === 'cleanest' ? 6 : 3} opacity={0.7} />
           ))}
         </MapContainer>
       </div>
-      <p className="text-[10px] text-gray-400 mt-2 text-center uppercase tracking-widest font-bold">
-        {endPos ? "Route Calculated" : "Click map to set destination"}
-      </p>
     </div>
   );
 }
