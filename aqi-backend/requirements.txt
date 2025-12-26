@@ -1,1 +1,11 @@
-ÿþ
+fastapi & uvicorn (For the server)
+
+xgboost (To run your model)
+
+pandas & numpy (For data handling)
+
+joblib (To load the .pkl)
+
+requests (For the Weather/AQI APIs)
+
+python-dotenv (For security)

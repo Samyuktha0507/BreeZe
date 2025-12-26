@@ -1,6 +1,10 @@
 from fastapi import FastAPI, Query
+from fastapi.middleware.cors import CORSMiddleware
+from typing import List
+from pydantic import BaseModel
 from app.services.maps_api import get_live_aqi
 from app.services.exposure_calc import calculate_exposure, get_health_advice
+from app.api.endpoints.predict import predict_actual_aqi
 
 # 1. Initialize the FastAPI app
 app = FastAPI(
@@ -9,7 +13,28 @@ app = FastAPI(
     version="1.0.0"
 )
 
-# 2. Root Endpoint - Basic Health Check
+# 2. Add CORS Middleware (Essential for Frontend integration)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# 3. Data Schemas for Route Comparison
+class RoutePoint(BaseModel):
+    lat: float
+    lon: float
+    time_spent_minutes: float
+
+class RouteRequest(BaseModel):
+    route_name: str
+    points: List[RoutePoint]
+    activity: str = "walking"
+
+# --- ENDPOINTS ---
+
 @app.get("/")
 async def root():
     return {
@@ -18,61 +43,49 @@ async def root():
         "documentation": "/docs"
     }
 
-# 3. Simple Test Endpoint - Fetch Raw Data from WAQI
-@app.get("/test-live-data")
-async def test_api(
-    lat: float = Query(28.6139, description="Latitude of the location"), 
-    lon: float = Query(77.2090, description="Longitude of the location")
-):
-    """Fetches real-time AQI data for specific coordinates."""
-    data = get_live_aqi(lat, lon)
-    if data:
-        return {"status": "success", "data": data}
-    return {"status": "error", "message": "Could not fetch data from WAQI API. Check your .env key."}
-
-# 4. Smart Endpoint - Personalized Health & Exposure Analysis
-@app.get("/analyze-air")
-async def analyze_air(
-    lat: float, 
-    lon: float, 
-    activity: str = Query("walking", enum=["resting", "walking", "running", "cycling"]), 
-    duration: int = Query(60, description="Duration in minutes")
-):
-    """
-    Calculates the 'Pollution Load' based on real-time data and user activity.
-    Hero Feature Logic for Person B.
-    """
-    # Step A: Get Live Data
-    raw_data = get_live_aqi(lat, lon)
-    
-    if not raw_data:
-        return {"error": "Could not fetch air quality data"}
-    
-    aqi = raw_data["aqi"]
-    
-    # Step B: Calculate personalized metrics using our Service logic
-    health = get_health_advice(aqi)
-    exposure = calculate_exposure(aqi, duration, activity)
+@app.get("/predict")
+async def get_prediction(lat: float, lon: float, hour: int = None):
+    """Person A's ML Prediction Hooked to Live Weather"""
+    prediction = predict_actual_aqi(lat, lon, hour)
+    advice = get_health_advice(prediction)
     
     return {
-        "location": {
-            "city": raw_data["city"],
-            "latitude": lat,
-            "longitude": lon
+        "status": "Success",
+        "input_location": {"lat": lat, "lon": lon},
+        "ml_result": {
+            "predicted_aqi": prediction,
+            "category": advice["level"],
+            "guidance": advice["advice"]
         },
-        "air_quality": {
-            "current_aqi": aqi,
-            "status": health["level"],
-            "recommendation": health["advice"]
-        },
-        "personalized_impact": {
-            "estimated_exposure_score": exposure,
-            "activity_context": f"{activity} for {duration} minutes",
-            "formula_used": "AQI * Time(hrs) * Activity_Factor"
-        }
+        "source": "XGBoost Regressor"
     }
 
-# 5. Health Check for the server
+@app.post("/compare-routes")
+async def compare_routes(routes: List[RouteRequest]):
+    """Hero Feature: Calculates total pollution exposure for multiple routes."""
+    results = []
+    for route in routes:
+        total_exposure = 0
+        for point in route.points:
+            # INTEGRATION: Use ML prediction if it's a future hour, else live data
+            # For now, we use live data as the primary source
+            data = get_live_aqi(point.lat, point.lon)
+            aqi = data["aqi"] if (data and "aqi" in data) else 50 
+            
+            segment_score = calculate_exposure(aqi, point.time_spent_minutes, route.activity)
+            total_exposure += segment_score
+            
+        results.append({
+            "route_name": route.route_name,
+            "total_pollution_load": round(total_exposure, 2)
+        })
+    
+    results.sort(key=lambda x: x["total_pollution_load"])
+    return {
+        "comparison": results,
+        "recommendation": f"The cleanest route is {results[0]['route_name']}"
+    }
+
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
