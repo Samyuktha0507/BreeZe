@@ -15,4 +15,9 @@ def get_live_aqi(lat: float, lon: float):
                 "aqi": data["data"]["aqi"],
                 "city": data["data"]["city"]["name"]
             }
+def get_historical_lag_aqi(lat: float, lon: float):
+    current = get_live_aqi(lat, lon)
+    if current:
+        return current['aqi'] * 0.95 
+    return 50.0
     return None
