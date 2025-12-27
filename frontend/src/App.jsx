@@ -4,17 +4,21 @@ import MapView from './components/MapView'; // Module 2
 import HeatmapView from './components/HeatmapView'; // Module 1
 import Scheduler from './components/Scheduler'; // Module 3
 import CitizenResponsibility from './components/CitizenResponsibility'; // Module 4
-import { Map, Wind, Calendar, Users } from 'lucide-react';
+import { Map, Wind, Calendar, Users, Activity } from 'lucide-react'; // Added Activity icon
+import LungAQI from "./components/LungAQI";
 
 export default function App() {
   const [activeModule, setActiveModule] = useState('routing');
   const [routeData, setRouteData] = useState(null);
+  // Optional: State to sync the lung with the current predicted AQI
+  const [currentAqi, setCurrentAqi] = useState(75);
 
   const menu = [
     { id: 'routing', name: 'Green Route', icon: <Map size={18}/> },
     { id: 'heatmap', name: 'ML Heatmap', icon: <Wind size={18}/> },
     { id: 'scheduler', name: 'Plan Scheduler', icon: <Calendar size={18}/> },
     { id: 'impact', name: 'Citizen Impact', icon: <Users size={18}/> },
+    { id: 'lungs', name: 'Virtual Lung', icon: <Activity size={18}/> }, // New Module
   ];
 
   return (
@@ -57,7 +61,10 @@ export default function App() {
           <div className="max-w-5xl mx-auto">
             {activeModule === 'routing' && (
               <div className="space-y-6 animate-in fade-in duration-500">
-                <MapView onRouteDataReceived={setRouteData} />
+                <MapView onRouteDataReceived={(data) => {
+                  setRouteData(data);
+                  if(data?.avg_aqi) setCurrentAqi(data.avg_aqi);
+                }} />
               </div>
             )}
 
@@ -72,10 +79,29 @@ export default function App() {
                 <Scheduler />
               </div>
             )}
-
+            
             {activeModule === 'impact' && (
               <div className="animate-in slide-in-from-bottom-4 duration-500">
                 <CitizenResponsibility />
+              </div>
+            )}
+
+            {/* New Virtual Lung Tab */}
+            {activeModule === 'lungs' && (
+              <div className="animate-in zoom-in-95 duration-500 h-[600px] flex flex-col gap-6">
+                <LungAQI aqi={currentAqi} />
+                
+                {/* Simulator Slider to show judges the transition effects */}
+                <div className="bg-white p-6 rounded-3xl shadow-sm border border-gray-100">
+                   <p className="text-[10px] font-bold text-gray-400 uppercase tracking-widest mb-4 text-center">Simulate AQI Exposure Level</p>
+                   <input 
+                    type="range" 
+                    min="10" max="400" 
+                    value={currentAqi} 
+                    onChange={(e) => setCurrentAqi(Number(e.target.value))}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-green-600"
+                   />
+                </div>
               </div>
             )}
           </div>
